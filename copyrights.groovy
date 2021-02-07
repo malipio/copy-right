@@ -44,9 +44,9 @@ cli.l(longOpt: 'toolkit-login', args: 1, required: false, defaultValue: System.g
         'Toolkit login (defaults to %USERNAME%)')
 cli.p(longOpt: 'toolkit-password-base64', args: 1, required: true,
         'Toolkit password Base64 encoded')
-cli.d(longOpt: 'dry-run', 'Do not send to NCSCOPY') // TODO
-cli.c(longOpt: 'config-file', 'Reads config from YAML file in addition to command line') // TODO or read from zipDir?
-cli.n(longOpt: 'now', 'Assumes generation for current month') // TODO
+//cli.d(longOpt: 'dry-run', 'Do not send to NCSCOPY') // TODO
+//cli.c(longOpt: 'config-file', 'Reads config from YAML file in addition to command line') // TODO or read from zipDir?
+//cli.n(longOpt: 'now', 'Assumes generation for current month') // TODO
 def options = cli.parse(args)
 
 if (options == null) {
