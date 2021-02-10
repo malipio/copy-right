@@ -61,6 +61,7 @@ def zipDir = options.'zip-dir' as String
 def login = options.'toolkit-login' as String
 def password = new String(Base64.decoder.decode(options.'toolkit-password-base64' as String), 'UTF-8')
 
+println "Finding all git repos under $repoBaseDir"
 def gitRootRepos = findAllGitReposUnderDir(repoBaseDir)
 
 println "Found repos: $gitRootRepos"
@@ -159,11 +160,13 @@ private findAllGitReposUnderDir(repoBaseDir) {
                                     preDir : {
                                         if (it.listFiles().find { dir -> dir.isDirectory() && dir.name == '.git' } != null) {
                                             gitRootRepos += it
+                                            print "."
                                             return FileVisitResult.SKIP_SUBTREE
                                         }
                                     },
                                     postDir: {}
     ])
+    println ''
     gitRootRepos
 }
 
