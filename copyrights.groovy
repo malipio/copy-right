@@ -82,7 +82,8 @@ List filesToZip = gitRootRepos.parallelStream().map() { repoDir ->
     def fileName = new File(zipDir, "$year-${String.format("%02d", month)}_${repoName}.txt")
     println "Listing commits by $gitUser during $startDate-$endDate in $repoDir to $fileName"
 
-    def gitLogWithDiff = "git -C \"$repoDir\" log --since ${startDate} --until ${endDate} --author $gitUser -p --all --full-history --reverse --raw --stat"
+    def gitLogWithDiff = ['git', '-C', repoDir, 'log', '--since', startDate, '--until', endDate, '--author', gitUser,
+                          '-p', '--all', '--full-history', '--reverse', '--raw', '--stat']
             .execute().text
 
     println "stats: ${gitLogWithDiff.readLines().size()} lines (${gitLogWithDiff.size()} bytes)"
@@ -127,7 +128,7 @@ private String findRepoName(String repoUrl) {
 }
 
 private String findRepoRemoteUrl(String repo) {
-    def originLine = "git -C \"$repo\" remote -v".execute().text.readLines().find {
+    def originLine = ['git', '-C', repo, 'remote', '-v'].execute().text.readLines().find {
         it.startsWith('origin')
     }
 
