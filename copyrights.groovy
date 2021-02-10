@@ -158,7 +158,8 @@ private findAllGitReposUnderDir(repoBaseDir) {
     def gitRootRepos = []
     new File(repoBaseDir).traverse([type   : FileType.DIRECTORIES,
                                     preDir : {
-                                        if (it.listFiles().find { dir -> dir.isDirectory() && dir.name == '.git' } != null) {
+                                        def gitDir = new File(it as File, '.git')
+                                        if (gitDir.exists() && gitDir.isDirectory()) {
                                             gitRootRepos += it
                                             print "."
                                             return FileVisitResult.SKIP_SUBTREE
