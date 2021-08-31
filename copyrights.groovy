@@ -121,7 +121,7 @@ List filesToZip = gitRootRepos.parallelStream().map() { repoDir ->
     }
     def repoName = findRepoName(repoUrl)
 
-    def fileName = new File(zipDir, formatRepoDiffFileName(fileDateTimeFormatter, timeframe, currentDate, repoName))
+    def fileName = new File(zipDir, formatRepoDiffFileName(fileDateTimeFormatter, timeframe, currentDate, new File(repoDir)))
     println "Listing commits by $gitUser during $timeframe in $repoDir to $fileName"
 
     def gitLogWithDiff = ['git', '-C', repoDir, 'log',
@@ -179,8 +179,9 @@ private String formatZipName(DateTimeFormatter formatter, Timeframe timeframe, L
     return "${timeframe.start.format(formatter)}-${timeframe.end.format(formatter)}_at_${currentDate.format(formatter)}.zip"
 }
 
-private String formatRepoDiffFileName(DateTimeFormatter formatter, Timeframe timeframe, LocalDateTime currentDate, String repoName) {
-    return "${timeframe.start.format(formatter)}-${timeframe.end.format(formatter)}_${repoName}.txt"
+private String formatRepoDiffFileName(DateTimeFormatter formatter, Timeframe timeframe, LocalDateTime currentDate, File repoDir) {
+    def safeRepoDirName = repoDir.canonicalPath.replaceAll($/[\\/:]/$, '_')
+    return "${timeframe.start.format(formatter)}-${timeframe.end.format(formatter)}_${safeRepoDirName}.txt"
 }
 
 private String findRepoName(String repoUrl) {
