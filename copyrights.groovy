@@ -5,6 +5,7 @@
 import groovy.io.FileType
 import groovy.io.FileVisitResult
 import groovy.json.JsonSlurper
+import groovy.transform.CompileStatic
 import groovy.xml.XmlSlurper
 import org.apache.hc.client5.http.auth.AuthScope
 import org.apache.hc.client5.http.auth.CredentialsStore
@@ -24,50 +25,91 @@ import org.apache.hc.core5.http.message.BasicNameValuePair
 import org.apache.hc.core5.net.URIBuilder
 
 import java.time.LocalDateTime
-import java.time.YearMonth
+import java.time.OffsetDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeFormatterBuilder
+import java.time.temporal.ChronoUnit
 import java.util.stream.Collectors
 import java.util.zip.ZipOutputStream
 import java.util.zip.ZipEntry
 import groovy.cli.commons.CliBuilder
 
 
-def cli = new CliBuilder(usage: 'copyrights -y year -m month -r repoBaseDir', header: 'Options:')
+enum TimeframeType {
+    LAST_SUBMISSION
+
+}
+
+class Timeframe {
+    LocalDateTime start, end
+
+    @Override
+    String toString() {
+        return "(${start} to ${end})"
+    }
+}
+
+def cli = new CliBuilder(usage: 'groovy copyrights.groovy --toolkit-login <login> --toolkit-password-base64 <password>', header: 'Options:')
 cli.h(longOpt: 'help', 'print this message')
-cli.y(longOpt: 'year', args: 1, argName: 'year', required: true, 'submission year')
-cli.m(longOpt: 'month', args: 1, argName: 'month', required: true, 'submission month')
 cli.r(longOpt: 'repo', args: 1, argName: 'repoBaseDir', required: true, 'baseDir with git repos (searched automatically)')
 cli.g(longOpt: 'git-user', args: 1, argName: 'gitUser', required: false, defaultValue: System.getenv('USERNAME'),
         'Git user name (defaults to %USERNAME%)')
 cli.z(longOpt: 'zip-dir', args: 1, argName: 'zipDir', required: false, defaultValue: new File("").getAbsolutePath(),
-        'Folder to store ZIP files, defaults to working dir')
+        'Folder to store ZIP files, defaults to working dir') // TODO rename to working-dir
 cli.l(longOpt: 'toolkit-login', args: 1, required: false, defaultValue: System.getenv('USERNAME'),
         'Toolkit login (defaults to %USERNAME%)')
 cli.p(longOpt: 'toolkit-password-base64', args: 1, required: true,
         'Toolkit password Base64 encoded')
 //cli.d(longOpt: 'dry-run', 'Do not send to NCSCOPY') // TODO
 //cli.c(longOpt: 'config-file', 'Reads config from YAML file in addition to command line') // TODO or read from zipDir?
-//cli.n(longOpt: 'now', 'Assumes generation for current month') // TODO
+def currentDateOption = cli.option([longOpt: 'date', args: 1], LocalDateTime,
+        'Default value: now. Date (and possibly time) all timeframe calculation are relative to.')
+def timeFrameOption = cli.option([longOpt: 'timeframe', args: 1], TimeframeType,
+        "Time frame for report generation. Choose from: ${TimeframeType.values().join(', ')}.")
 def options = cli.parse(args)
 
 if (options == null) {
     throw new IllegalArgumentException("wrong arguments")
 }
 
-def year = options.year as int
-def month = options.month as int
+final DateTimeFormatter fileDateTimeFormatter = new DateTimeFormatterBuilder()
+        .appendPattern('yyyyMMdd_HHmm').toFormatter()
+final LocalDateTime currentDate = options.getOptionValue(currentDateOption, LocalDateTime.now().truncatedTo(ChronoUnit.MINUTES))
+final TimeframeType timeframeType = options.getOptionValue(timeFrameOption, TimeframeType.LAST_SUBMISSION)
 def gitUser = options.'git-user' as String
-def repoBaseDir = options.repo
+def repoBaseDir = options.repo as String
 def zipDir = options.'zip-dir' as String
 def login = options.'toolkit-login' as String
 def password = new String(Base64.decoder.decode(options.'toolkit-password-base64' as String), 'UTF-8')
 
 println "Finding all git repos under $repoBaseDir"
-def gitRootRepos = findAllGitReposUnderDir(repoBaseDir)
+List<String> gitRootRepos = findAllGitReposUnderDir(repoBaseDir)
 
-println "Found repos: $gitRootRepos"
+println "Found ${gitRootRepos.size()} repos: $gitRootRepos"
 
-def startDate = YearMonth.of(year, month).atDay(1)
-def endDate = YearMonth.of(year, month).atEndOfMonth()
+if (gitRootRepos.empty) {
+    println "No git repositories found. Exiting."
+    return
+}
+
+def ncsCopyRestClient = new NcsCopyRestClient('NCDMZ', login, password)
+def itemTitle = formatItemTitle(currentDate)
+
+Timeframe timeframe = createTimeframe(timeframeType, currentDate, ncsCopyRestClient, itemTitle)
+
+private Timeframe createTimeframe(TimeframeType timeframeType, LocalDateTime currentDate,
+                                  NcsCopyRestClient ncsCopyRestClient, String itemTitle) {
+    switch (timeframeType) {
+        case TimeframeType.LAST_SUBMISSION:
+            LocalDateTime lastSubmissionDate = ncsCopyRestClient.findExistingItemSubmissionDate(itemTitle) ?:
+                    currentDate.withDayOfMonth(1).truncatedTo(ChronoUnit.DAYS)
+            return new Timeframe(start: lastSubmissionDate, end: currentDate)
+            break
+        default:
+            throw new UnsupportedOperationException("${timeframeType} is unsupported!")
+    }
+}
 
 long start = System.currentTimeMillis()
 List filesToZip = gitRootRepos.parallelStream().map() { repoDir ->
@@ -79,10 +121,12 @@ List filesToZip = gitRootRepos.parallelStream().map() { repoDir ->
     }
     def repoName = findRepoName(repoUrl)
 
-    def fileName = new File(zipDir, "$year-${String.format("%02d", month)}_${repoName}.txt")
-    println "Listing commits by $gitUser during $startDate-$endDate in $repoDir to $fileName"
+    def fileName = new File(zipDir, formatRepoDiffFileName(fileDateTimeFormatter, timeframe, currentDate, repoName))
+    println "Listing commits by $gitUser during $timeframe in $repoDir to $fileName"
 
-    def gitLogWithDiff = ['git', '-C', repoDir, 'log', '--since', startDate, '--until', endDate, '--author', gitUser,
+    def gitLogWithDiff = ['git', '-C', repoDir, 'log',
+                          '--date=local', '--since', timeframe.start, '--until', timeframe.end,
+                          '--author', gitUser,
                           '-p', '--all', '--full-history', '--reverse', '--raw', '--stat']
             .execute().text
 
@@ -93,13 +137,14 @@ List filesToZip = gitRootRepos.parallelStream().map() { repoDir ->
         return []
     } else {
         fileName.withPrintWriter {
-            it.println("Listing commits by $gitUser during $startDate-$endDate for $repoUrl")
+            it.println("Listing commits by $gitUser during $timeframe for $repoUrl")
             it.println(gitLogWithDiff)
         }
         println "Done with $repoDir."
         return [fileName]
     }
 }.collect(Collectors.toList()).flatten()
+
 println "Scanning and listing submissions took ${(System.currentTimeMillis() - start) / 1000}s"
 
 if (filesToZip.empty) {
@@ -108,7 +153,9 @@ if (filesToZip.empty) {
 }
 
 println "Changesets total size: ${filesToZip.sum { it.size() } >> 10}KB"
-def zipFile = new File(zipDir, "$year-${String.format("%02d", month)}.zip")
+
+def zipFile = new File(zipDir, formatZipName(fileDateTimeFormatter, timeframe, currentDate))
+
 println "Zipping files: $filesToZip to $zipFile"
 
 zipFiles(zipFile, filesToZip)
@@ -119,9 +166,22 @@ println "Temporary files deleted"
 
 println "Sending to ncscopy"
 
-def submissionDate = YearMonth.of(year, month).atEndOfMonth().minusDays(4).atStartOfDay()
-def itemTitle = "${year}_${String.format('%02d', month)}"
-new NcsCopyRestClient('NCDMZ', login, password).submitCopyrights(itemTitle, submissionDate, zipFile)
+def submissionDate = currentDate
+
+ncsCopyRestClient.submitCopyrights(itemTitle, submissionDate, zipFile)
+
+private String formatItemTitle(LocalDateTime currentDate) {
+    return "${currentDate.year}_${String.format('%02d', currentDate.monthValue)}"
+}
+
+private String formatZipName(DateTimeFormatter formatter, Timeframe timeframe, LocalDateTime currentDate) {
+
+    return "${timeframe.start.format(formatter)}-${timeframe.end.format(formatter)}_at_${currentDate.format(formatter)}.zip"
+}
+
+private String formatRepoDiffFileName(DateTimeFormatter formatter, Timeframe timeframe, LocalDateTime currentDate, String repoName) {
+    return "${timeframe.start.format(formatter)}-${timeframe.end.format(formatter)}_${repoName}.txt"
+}
 
 private String findRepoName(String repoUrl) {
     repoUrl.split("/")[-1].replace(".git", "")
@@ -140,6 +200,7 @@ private String findRepoRemoteUrl(String repo) {
 }
 
 
+@CompileStatic
 def zipFiles(File zipFileName, List<File> files) {
     ZipOutputStream zipFile = new ZipOutputStream(new FileOutputStream(zipFileName))
     files.each { file ->
@@ -155,13 +216,14 @@ def zipFiles(File zipFileName, List<File> files) {
     zipFile.close()
 }
 
-private findAllGitReposUnderDir(repoBaseDir) {
-    def gitRootRepos = []
+@CompileStatic
+private List<String> findAllGitReposUnderDir(String repoBaseDir) {
+    List<String> gitRootRepos = []
     new File(repoBaseDir).traverse([type   : FileType.DIRECTORIES,
                                     preDir : {
                                         def gitDir = new File(it as File, '.git')
                                         if (gitDir.exists() && gitDir.isDirectory()) {
-                                            gitRootRepos += it
+                                            gitRootRepos += it as String
                                             print "."
                                             return FileVisitResult.SKIP_SUBTREE
                                         }
@@ -189,10 +251,7 @@ class NcsCopyRestClient {
     }
 
     String submitCopyrights(String itemTitle, LocalDateTime submissionDate, File attachmentFile) {
-        def existingItemId = httpGet(new URIBuilder("${webApiUrl}/lists/GetByTitle('WorkItems')/items")
-                .setParameters(new BasicNameValuePair('$filter', "Title eq '${itemTitle}'"))
-                .toString())
-                .value[0]?.ID
+        def existingItemId = findExistingItem(itemTitle)?.ID
         if (existingItemId) {
             println "Work item with same title exists, ID=$existingItemId"
         }
@@ -203,7 +262,28 @@ class NcsCopyRestClient {
         String formDigest = new XmlSlurper(false, true).parseText(digestResponse).FormDigestValue.text()
         println 'Digest is ' + formDigest
 
-        def itemId = http(postNewItem(formDigest, folderName, itemTitle)).value.find { it.FieldName == 'Id' }?.FieldValue
+        def itemId = existingItemId ?: http(postNewItem(formDigest, folderName, itemTitle)).value.find { it.FieldName == 'Id' }?.FieldValue
+
+        def attachmentUri = uploadAttachment(itemId, attachmentFile, formDigest)
+
+        updateAuthorAndSubmissionDate(itemId, formDigest, submissionDate)
+
+        def itemInfo = existingItemId ? "Updated existing item with ID=${existingItemId}" : "New work item created with ID=${itemId}"
+        println "${itemInfo} and with attachment saved in ${hostUrl}${attachmentUri}"
+        println "Direct Link: $hostUrl/cases/GTE106/NCSCOPY/Lists/WorkItems/DispForm.aspx?ID=$itemId"
+        return itemId
+    }
+
+    private String uploadAttachment(itemId, File attachmentFile, String formDigest) {
+        http(ClassicRequestBuilder.post()
+                .setUri("${webApiUrl}/lists/GetByTitle('WorkItems')/items($itemId)/AttachmentFiles/add(FileName='${attachmentFile.name}')")
+                .setHeader('X-RequestDigest', formDigest)
+                .setHeader('Accept', ContentType.APPLICATION_JSON.toString())
+                .setEntity(new FileEntity(attachmentFile, ContentType.APPLICATION_OCTET_STREAM))
+                .build()).ServerRelativeUrl
+    }
+
+    private void updateAuthorAndSubmissionDate(itemId, String formDigest, LocalDateTime submissionDate) {
         def authorId = httpGet("${webApiUrl}/lists/GetByTitle('WorkItems')/items($itemId)").AuthorId
         http(ClassicRequestBuilder.post()
                 .setUri("${webApiUrl}/lists/GetByTitle('WorkItems')/items(${itemId})")
@@ -214,20 +294,23 @@ class NcsCopyRestClient {
                 .setEntity(new StringEntity("""{
   "ClassificationId": 12,
   "EmployeeId": $authorId,
-  "SubmissionDate": "${submissionDate}"
+  "SubmissionDate": "$submissionDate"
 }
 """, ContentType.APPLICATION_JSON)).build())
+    }
 
-        def attachmentUri = http(ClassicRequestBuilder.post()
-                .setUri("${webApiUrl}/lists/GetByTitle('WorkItems')/items($itemId)/AttachmentFiles/add(FileName='${attachmentFile.name}')")
-                .setHeader('X-RequestDigest', formDigest)
-                .setHeader('Accept', ContentType.APPLICATION_JSON.toString())
-                .setEntity(new FileEntity(attachmentFile, ContentType.APPLICATION_OCTET_STREAM))
-                .build()).ServerRelativeUrl
+    private def findExistingItem(String itemTitle) {
+        httpGet(new URIBuilder("${webApiUrl}/lists/GetByTitle('WorkItems')/items")
+                .setParameters(new BasicNameValuePair('$filter', "Title eq '${itemTitle}'"))
+                .toString())
+                .value ?[0]
 
-        println "New work item created with ID=${itemId} and with attachment saved in ${hostUrl}${attachmentUri}"
-        println "Direct Link: $hostUrl/cases/GTE106/NCSCOPY/Lists/WorkItems/DispForm.aspx?ID=$itemId"
-        return itemId
+    }
+
+    LocalDateTime findExistingItemSubmissionDate(String itemTitle) {
+        def submissionDateString = findExistingItem(itemTitle)?.SubmissionDate as String
+
+        return submissionDateString ? LocalDateTime.ofInstant(OffsetDateTime.parse(submissionDateString).toInstant(), ZoneId.systemDefault()) : null
     }
 
     private Object httpGet(String element) {
