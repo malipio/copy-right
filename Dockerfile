@@ -4,7 +4,7 @@ USER root
 RUN apt-get clean && apt-get update && \
     apt-get install -y git
 
-COPY copyrights.groovy /home/groovy/scripts/
+COPY src/main/groovy/copyrights.groovy /home/groovy/scripts/
 RUN chown -R groovy:groovy /home/groovy/scripts
 
 USER groovy

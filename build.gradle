@@ -1,0 +1,35 @@
+plugins {
+    id 'groovy'
+}
+
+repositories {
+    mavenCentral()
+}
+
+configurations {
+    ivy
+}
+
+dependencies {
+    ivy 'org.apache.ivy:ivy:2.4.0'
+    implementation 'org.codehaus.groovy:groovy-all:3.0.8'
+    implementation 'org.codehaus.groovy:groovy-cli-commons:3.0.8'
+
+    testImplementation 'org.spockframework:spock-core:2.0-groovy-3.0'
+    testImplementation 'junit:junit:4.13.2'
+
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
+
+tasks.withType(GroovyCompile) {
+    groovyClasspath += configurations.ivy
+}
+
+task run(type: JavaExec) {
+    main = 'groovy.lang.GroovyShell'
+    args file('src/main/groovy/copyrights.groovy')
+    classpath = sourceSets.main.runtimeClasspath + configurations.ivy
+}
