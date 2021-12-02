@@ -6,7 +6,11 @@ name: Build main
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
 jobs:
   build:
 
@@ -24,16 +28,16 @@ jobs:
         uses: gradle/wrapper-validation-action@e6e38bacfdf1a337459f332974bb2327a31aaf4b
       - name: Build with Gradle
         run: ./gradlew build
-#      - name: XUnit Viewer
-#        id: xunit-viewer
-#        uses: AutoModality/action-xunit-viewer@v1
-#        with:
-#          results: build/test-results/test
-#      - name: Attach the report
-#        uses: actions/upload-artifact@v1
-#        with:
-#          name: ${{ steps.xunit-viewer.outputs.report-name }}
-#          path: ${{ steps.xunit-viewer.outputs.report-dir }}
+      #      - name: XUnit Viewer
+      #        id: xunit-viewer
+      #        uses: AutoModality/action-xunit-viewer@v1
+      #        with:
+      #          results: build/test-results/test
+      #      - name: Attach the report
+      #        uses: actions/upload-artifact@v1
+      #        with:
+      #          name: ${{ steps.xunit-viewer.outputs.report-name }}
+      #          path: ${{ steps.xunit-viewer.outputs.report-dir }}
       - name: Cleanup Gradle Cache
         # Remove some files from the Gradle cache, so they aren't cached by GitHub Actions.
         # Restoring these files from a GitHub Actions cache might cause problems for future builds.
