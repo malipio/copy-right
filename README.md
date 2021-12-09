@@ -42,7 +42,7 @@ docker run -it -v c:\projects:/projects -v c:\copyrights:/copyrights ghcr.io/mal
     --toolkit-password-base64 YWRtaW4x \
     --zip-dir /copyrights 
 ```
-
+Above command does not work when trying to run from Git Bash, use PowerShell when running on Windows.
 ## Running as groovy script
 ### Prerequisites
 * [groovy 3.x](https://groovy.apache.org/download.html) installed and available on path
@@ -50,9 +50,9 @@ docker run -it -v c:\projects:/projects -v c:\copyrights:/copyrights ghcr.io/mal
 ### CLI
 ```
 groovy https://raw.githubusercontent.com/malipio/copy-right/main/src/main/groovy/copyrights.groovy \
-    --repo c:\projects 
-    --toolkit-password-base64 YWRtaW4x 
-    --zip-dir c:\copyrights
+    --repo 'c:\projects' 
+    --toolkit-password-base64 'YWRtaW4x' 
+    --zip-dir 'c:\copyrights'
 ```
 
 # Scheduling on Windows
